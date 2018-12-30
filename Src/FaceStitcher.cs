@@ -14,8 +14,36 @@ namespace CrossSectionalImageToSTL.Src
     //and stitches the Vertices they represent into faces
     static class FaceStitcher
     {
-        //Read image, obtain normalized pixel coordinates of BLACK pixels ONLYs
+        //Struct used for sorting norm. pix. coords
+        struct NormPixCoordSortStruct
+        {
+            public Vector2Df coord { get; set; }
+            public double angle { get; set; }
+            //unused field 'mag', kept to not break anything ATM
+            //will be cleaned up later
+            public double mag { get; set; }
+        }
+
+        //Enum used in the CollapseNormCoordsWithinAngleTolerance(...)
+        //Determines the method to 'collapse' the NormCoords
+        public enum NormCoordCollapseOperation {UseClosestToOrigin, UseFurthestFromOrigin, UseAverage };
+
+        //Plain English: The models generated must represent closed volumes - if there are NormCoords that form overlapping volumes, the generated model will not be useful
+        //By collapsing all the NormCoords within a sector whose angle is given by 'sectorAngleDivision'
+        //The image space has been converted to polar coordinates at this point, and the 360 degree image space is chopped into sectors with angles 'sectorAngleDivision'
+        //Therefore, 360 / 'sectorAngleDivision' will return the number of subsections created
+        //If there are multiple NormCoords within a subsection, they are collapsed into a single NormCoord
+        //The operation to determine this new NormCoord is specified by the 3rd Parameter
+        private static List<NormPixCoordSortStruct> CollapseNormCoordsWithinAngleTolerance( List<NormPixCoordSortStruct> normPixCoordSortStructs, double sectorAngleDivision)
+        {
+
+        }
+
+        //Read image, obtain normalized pixel coordinates of BLACK pixels ONLY
         // NEED FOR SPEED
+        //This does not sort the normal pixel coordinates in a meaningful way. this should be done 
+        //elsewhere
+        //WARNING:  !!! ORDER MATTERS !!!
         private static List< Vector2Df > BitmapToNormPixCoords(Bitmap image)
         {
             //Norm. Pixel Coord List
@@ -50,8 +78,9 @@ namespace CrossSectionalImageToSTL.Src
                     if(pixel == 0)
                     {
                         //Compute
-                        float pX = 1.0f / (float)(bData.Width - 1);
-                        float pY = 1.0f / (float)(bData.Height - 1);
+                        //       Normalizing coefficient               Positional coefficient
+                        float pX = (1.0f / (float)(bData.Width - 1)) * (float)ii;
+                        float pY = (1.0f / (float)(bData.Height - 1)) * (float)jj;
 
                         //Add 'em
                         normPixCoords.Add( new Vector2Df(pX, pY) );
@@ -66,11 +95,11 @@ namespace CrossSectionalImageToSTL.Src
             return normPixCoords;
         }
 
-        //Stitch faces together
-        public static List< Face > PixelsToFaces(Bitmap image, Plane plane,  bool connectFirstAndLast)
+        //Create a vertex list
+        public static List< Vector3Df > PixelsToVertices(Bitmap image, Plane plane,  bool connectFirstAndLast)
         {
             //This is where we will store the geometry
-            List< Face > geometry = new List< Face >();
+            List< Vector3Df > geometry = new List< Vector3Df >();
 
             //Null check
             if(image is null)
@@ -81,36 +110,66 @@ namespace CrossSectionalImageToSTL.Src
             //Obtain normalized pixel coordinates
             List< Vector2Df >  normCoords = BitmapToNormPixCoords(image);
 
-            //Not normalized pixel coordinates found
-            if(normCoords.Count < 2)
+            //normalized pixel coordinates not found
+            if (normCoords.Count < 2)
             {
                 return geometry;
             }
 
-            //Used to traverse the list of Faces
-            //A face is created from 4 points
-            //Current and Previous represent two points of a face
-            //Another point is created with an offset of 1.0 in the perpindicular direction
-            //of the current plane
-            //This gives us 4 points, enough for a face
-            Vector2Df current = normCoords.ElementAt(1);
-            Vector2Df previous = normCoords.ElementAt(0);
+            //Used to sort 'normCoords'
+            List< NormPixCoordSortStruct > sortedNormCoords = new List< NormPixCoordSortStruct >();
+            //Sort the normalized coordinates
+            //Transform the Cartesian coordinate space of 'normCoords' into polar coordinates
+            //This allows us to sort the normCoords by their angle wrt. the origin
+            //This is done so that when normCoords are converted to vertices and stitched,
+            //they follow a clockwise direction. Otherwise the stitching would occur based on
+            //the traversal of the BitmapToNormCoords() function, which is not meaningful
+            //By sorting the normCoords according to their angle wrt. the origin, we can sort
+            //in a clockwise / counterclockwise manner, which ensures that when the stitching occurs,
+            //it will provide a meanginful model / vertex list
 
-            //Start at Index 1 (current)
-            using(IEnumerator<Vector2Df> pixEnumerator = normCoords.Skip(1).GetEnumerator())
+            foreach(Vector2Df normCoord in normCoords)
             {
-                //Assign Current
-                current = pixEnumerator.Current;
+                //Populate sorting List<>
+                sortedNormCoords.Add(new NormPixCoordSortStruct
+                {
+                    //preserve the normal coordinates
+                    coord = normCoord,
+                    //compute the angle wrt. horizontal thru origin
+                    angle = Math.Atan2(normCoord.y - 0.5, normCoord.x - 0.5),
+                    //compute Euclidean Distance (not squared)
+                    //may be used later
+                    mag = Math.Pow(normCoord.y - 0.5, 2.0) + Math.Pow(normCoord.x - 0.5, 2.0)
+                });
+            }
 
-                //Process
-                //Convert Vector2Df pixcoords -> Vector3Df
-                //Duplicate 'current', 'previous' with same coordinates + an offset in perp. direction to plane
-                Vector3Df v0 = MapPixCoordToVertex(current, plane);
-                Vector3Df v1 = v0.PerpToPlane(plane);
+            //Sort, then replace normCoords with it's sorted counterpart
+            sortedNormCoords.Sort(delegate(NormPixCoordSortStruct a, NormPixCoordSortStruct b)
+            {
+                return a.angle.CompareTo(b.angle);
+            });
 
+            //Replace
+            for(int i = 0;i < sortedNormCoords.Count;i++)
+            {
+                normCoords[i] = sortedNormCoords[i].coord;
+            }
 
-                //Assign previous
-                previous = current;
+            //Add to geometry
+            foreach(Vector2Df currentPixCoord in normCoords)
+            {
+                //Map prev pixel coordinates (2D) to vertices (3D)
+                Vector3Df v0 = MapPixCoordToVertex(currentPixCoord, plane);
+                //Add 1.0f to the component perpindicular to 'plane'
+                //This creates a line with one point represented by the norm. pixel coord
+                //and the other 1.0f 'into' the image space. 
+                //Same idea as having a piece of paper that represents the XY plane. One point of the line is visible,
+                //the other is into the page (z direction) behind the one we can see
+                Vector3Df v1 = MapPixCoordToVertex(currentPixCoord, plane).AddPerpToPlane(plane);
+
+                //Add them to geometry
+                geometry.Add(v0);
+                geometry.Add(v1);
             }
 
             //Give them back to me!

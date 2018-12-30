@@ -20,6 +20,7 @@ namespace CrossSectionalImageToSTL
         //Other
         private const int EXIT_FILE_NOT_FOUND = -2;
         private const int EXIT_FACE_FROM_PIXEL_ERROR = -3;
+        private const int EXIT_WRITE_GEOMETRY_ERROR = -4;
 
         //Arguments
         //arg 1: Name of Images
@@ -29,7 +30,7 @@ namespace CrossSectionalImageToSTL
             //Make sure all arguments are present
             if (args.Length < 2)
             {
-                Console.WriteLine("Not enough arguments!");
+                Console.WriteLine("!!! Not Enough Arguments !!!");
                 return EXIT_FAILURE;
             }
 
@@ -43,29 +44,40 @@ namespace CrossSectionalImageToSTL
             try
             {
                 //Do it
-                XYcrossSection = new Bitmap(args[1] + "1.bmp");
-                XZcrossSection = new Bitmap(args[1] + "2.bmp");
-                YZcrossSection = new Bitmap(args[1] + "3.bmp");
+                XYcrossSection = new Bitmap(args[0] + "1.bmp");
+                XZcrossSection = new Bitmap(args[0] + "2.bmp");
+                YZcrossSection = new Bitmap(args[0] + "3.bmp");
             }
-            catch( FileNotFoundException )
+            catch( Exception )
             {
                 //Print and return
-                Console.WriteLine("!!! File(s) not found !!!");
+                Console.WriteLine("!!! File I/O Runtime Error !!!");
                 return EXIT_FILE_NOT_FOUND;
             }
 
             //Obtain geometric representation of bitmaps
-            List<Face> XYgeometry = FaceStitcher.PixelsToFaces(XYcrossSection, Plane.XY, false);
-            List<Face> XZgeometry = FaceStitcher.PixelsToFaces(XZcrossSection, Plane.XZ, false);
-            List<Face> YZgeometry = FaceStitcher.PixelsToFaces(YZcrossSection, Plane.YZ, false);
+            List< Vector3Df > XYgeometry = FaceStitcher.PixelsToVertices(XYcrossSection, Plane.XY, false);
+            List< Vector3Df > XZgeometry = FaceStitcher.PixelsToVertices(XZcrossSection, Plane.XZ, false);
+            List< Vector3Df > YZgeometry = FaceStitcher.PixelsToVertices(YZcrossSection, Plane.YZ, false);
 
             //NULL Check
-            if (XYgeometry is null || XZgeometry is null|| YZgeometry is null) return EXIT_FACE_FROM_PIXEL_ERROR;
-            
+            if (XYgeometry is null || XZgeometry is null || YZgeometry is null)
+            {
+                //Print and return
+                Console.WriteLine("!!! Geometry Generation Error !!!");
+                return EXIT_FACE_FROM_PIXEL_ERROR;
+            }
+
+            //Write Geometry to File
+            if(!OBJFileIO.WriteGeometryToObj(XYgeometry, YZgeometry, XZgeometry, args[1]))
+            {
+                Console.WriteLine("!!! Error Writing Geometry To File !!!");
+                return EXIT_WRITE_GEOMETRY_ERROR;
+            }
 
             //Success
-            Console.WriteLine("---Generated model successfully---");
-            return 0;
+            Console.WriteLine("--- Generation Complete ---");
+            return EXIT_SUCCESS;
         }
     }
 }

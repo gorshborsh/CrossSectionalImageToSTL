@@ -63,7 +63,7 @@ namespace CrossSectionalImageToSTL.Src
         }
 
         //Add 1.0f to the component that represents the magnitude of the normal vector of 'plane'
-        public Vector3Df PerpToPlane(Plane plane)
+        public Vector3Df AddPerpToPlane(Plane plane)
         {
             //Which plane are we in?
             switch( plane )
